@@ -23,21 +23,49 @@ df <- College
 ```{r}
 boxplot(df$Grad.Rate)
 ```
+
 ```{r}
 private <- df %>% 
   filter(Private == "Yes")
 
 boxplot(private$Enroll)
-
-
-```
-```{r}
-str(df$Private)
 ```
 
 
+```{r}
+library(corrplot)
+
+corr_matrix <- cor(df[, -1])
+corrplot(corr_matrix, method = "color")
+```
 
 ```{r}
-boxplot(df$Top10perc)
+library(ggplot2)
+response_var <- "F.Undergrad"  
+predictors <- setdiff(names(df), response_var)
+
+for (var in predictors) {
+  p <- ggplot(df, aes_string(x = var, y = response_var)) +
+    geom_point() +
+    labs(title = paste(var, "vs", response_var), x = var, y = response_var) +
+    theme_minimal()
+  
+  print(p)
+}
+```
+
+```{r}
+for (var in predictors[-1]) {
+  p <- ggplot(df, aes_string(y = var)) +
+    geom_boxplot(color = "black", outlier.color = "red") +
+    labs(title = paste("Boxplot of", var), y = var) +
+    theme_minimal()
+  
+  print(p)
+}
+```
+
+```{r}
+
 ```
 
