@@ -1,0 +1,315 @@
+---
+title: "Project EDA"
+output: html_document
+date: "2025-02-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+library(ISLR2)
+library(dplyr)
+df <- College
+df
+```
+
+```{r}
+boxplot(df$Grad.Rate)
+```
+
+```{r}
+private <- df %>% 
+  filter(Private == "Yes")
+
+boxplot(private$Enroll)
+```
+
+
+```{r}
+install.packages("corrplot")
+library(corrplot)
+
+corr_matrix <- cor(df[, -1])
+corrplot(corr_matrix, method = "color")
+
+```
+
+
+
+
+
+```{r}
+# TRANSFORMATIONS AND BOX COX
+
+library(MASS) 
+
+
+numeric_cols <- College[, sapply(College, is.numeric)]
+
+num_vars <- ncol(numeric_cols)
+ncols <- 3
+nrows <- ceiling(num_vars / ncols)
+
+par(mfrow = c(nrows, ncols), mar = c(2, 2, 2, 1), oma = c(0, 0, 2, 0))
+
+for(col in names(numeric_cols)) {
+
+    x <- numeric_cols[[col]]
+  if(min(x, na.rm = TRUE) <= 0) {
+    constant <- abs(min(x, na.rm = TRUE)) + 1
+    x <- x + constant
+  }
+  
+  boxcox(x ~ 1, lambda = seq(-2, 2, by = 0.1), plotit = TRUE)
+  title(main = col)
+}
+
+
+```
+
+```{r}
+# Read the paper to see how they did it
+# Box cox for all of them
+
+# Apps = 0 = Log
+
+# Accpt: 0 = Log
+
+# Enroll = 0 = Log
+
+# Top 10 Perc = 0 = log OR 0.5 which is square root -- NO DIFFERENCE
+
+# TOP 25 Perc = close to 1: square root or NO transformation -- Yes difference
+
+# F.undergrade = 0 -.25: LOG -- Keeping log since that makes things interpretable
+
+# P.Undergrad: 0 = LOG
+
+# Outstate: .5, square root.
+
+# Room Board: log or .5
+
+# Books: log
+
+#Personal: log
+
+# Ph.D Square since we have value of 2
+
+#Terminal: square since val of 2
+
+# S.F Ration: around one so keep
+
+# Perc.Alumn: Square root
+
+# Expend: -0.5: using inverse fucntion
+
+# grad.rate: 1 keep
+
+
+# Present the findings
+
+# Then a full model
+names(College)
+```
+
+```{r}
+library(dplyr)
+
+
+College_transformed_1 <- College %>%
+  mutate(
+    # Log transformations
+    Apps_log = log(Apps),
+    Accept_log = log(Accept),
+    Enroll_log = log(Enroll),
+    
+    # OR 0.5 which is square root
+    Top10perc_log = log(Top10perc),
+    
+    
+    P.Undergrad_log = log(P.Undergrad ),
+    Books_log = log(Books),
+    Personal_log = log(Personal),
+    
+    # Square root transformations
+    
+    # OR NO transformation
+    Top25perc_sqrt = sqrt(Top25perc),
+    
+    # .5 so square root. OR LOG
+    Outstate_sqrt = sqrt(Outstate),
+    Room.Board_sqrt = sqrt(Room.Board),
+    perc.alumni_sqrt = sqrt(perc.alumni),
+    
+    # Square transformations
+    PhD_sq = PhD^2,
+    Terminal_sq = Terminal^2,
+    
+    # Inverse transformations
+    F.Undergrad_log = log(F.Undergrad),
+    Expend_inv = (Expend^(-0.5) - 1) / (-0.5)             # Lambda = -0.5
+  )    
+
+```
+
+
+```{r}
+College_transformed_2 <- College %>%
+  mutate(
+    #no transfomrations: 
+    Top25perc = Top25perc,
+
+    # Log transformations
+    Apps_log = log(Apps),
+    Accept_log = log(Accept),
+    Enroll_log = log(Enroll),
+    Room.Board_log = log(Room.Board),
+    P.Undergrad_log = log(P.Undergrad ),
+    Books_log = log(Books),
+    Personal_log = log(Personal),
+
+    
+    # Changing outstate to log:LOG
+    Outstate_log = log(Outstate),
+        
+    # Square root transformations
+    Top10perc_sqrt = sqrt(Top10perc),
+    perc.alumni_sqrt = sqrt(perc.alumni),
+    
+    
+    # Square transformations
+    PhD_sq = PhD^2,
+    Terminal_sq = Terminal^2,
+    
+    # Inverse transformations
+    F.Undergrad_log = log(F.Undergrad),
+    Expend_inv = (Expend^(-0.5) - 1) / (-0.5)             
+  )    
+
+# two datasets are made becuase there are some cases where I can't decide what transfomration to use, so I tried both to see what would happen
+
+```
+
+
+
+
+```{r}
+# MAIN EFFECTS MODEL
+# College transformed_1 and college transfromed_2 are the same datasets essentially since the edge cases in box cox didn't change signficance to my parameters excpet one: top25perc but that failed to be stat sig adjust p value corrections that are done in the next r chunk
+
+# Alot of our variables are not stat sig
+
+
+main_effects_model_1 <- lm(F.Undergrad_log ~ Private + Apps_log + Accept_log + 
+    Enroll_log + Top10perc_sqrt + Top25perc + P.Undergrad_log + 
+    Outstate_log + Room.Board_log + Books_log + Personal_log + 
+    PhD_sq + Terminal_sq + S.F.Ratio + perc.alumni_sqrt + Expend_inv + 
+    Grad.Rate, data = College_transformed_2)
+
+
+main_effects_model_2 <- lm(F.Undergrad_log ~ Private + Apps_log + Accept_log + 
+    Enroll_log + Top10perc_log + Top25perc_sqrt + P.Undergrad_log + 
+    Outstate_sqrt + Room.Board_sqrt + Books_log + Personal_log + 
+    PhD_sq + Terminal_sq + S.F.Ratio + perc.alumni_sqrt + Expend_inv + 
+    Grad.Rate, data = College_transformed_1)
+
+
+main_model_summary_1 = summary(main_effects_model_1)
+main_model_summary_2 = summary(main_effects_model_2)
+
+main_model_summary_1
+main_model_summary_2
+
+# So changing 
+# Top ten percent from log to sqrt, no difference made
+#  Room board from log to sqrt, difference made 
+```
+
+```{r}
+# EVALUATING MODEL WITH P VALUE CORRECTIONS
+# Alpha of 0.05
+
+p.vals = summary(main_effects_model_2)$coefficients[2:18,4]
+
+# bonferroni
+# Holm
+# Hoch
+# FDR
+which(p.adjust(p.vals, method = "bonferroni") < 0.05)
+which(p.adjust(p.vals, method = "holm") < 0.05)
+which(p.adjust(p.vals, method = "hochberg") < 0.05)
+which(p.adjust(p.vals, method = "fdr") < 0.05)
+
+
+# Hochberg is giving one more that is stat sig: perc_alumni_sqrt
+# will test between the two with anova
+
+
+trimmed_model_no_alum = lm(F.Undergrad_log ~ Private + Enroll_log + P.Undergrad_log + S.F.Ratio , data = College_transformed_1 )
+trimmed_model_with_alum = lm(F.Undergrad_log ~ Private + Enroll_log + P.Undergrad_log + S.F.Ratio +perc.alumni_sqrt , data = College_transformed_1 )
+
+anova(trimmed_model_no_alum,trimmed_model_with_alum )
+
+# Adding Perc.alumni_sqrt is not stat significant compared to the other model
+
+# Will keep trimmed_model_no_alum 
+```
+
+```{r}
+# Making a model with trimmed_model_no_alum's main effects as well as its interactions
+
+trimmed_model_no_alum_inter = lm(F.Undergrad_log ~ (Private + Enroll_log + P.Undergrad_log + S.F.Ratio)^2 , data = College_transformed_1 )
+summary(trimmed_model_no_alum_inter)
+
+
+# Correcting the p values that we get from the summary
+p.vals_inter = summary(trimmed_model_no_alum_inter)$coefficients[2:10,4]
+
+which(p.adjust(p.vals_inter, method = "bonferroni") < 0.05)
+which(p.adjust(p.vals_inter, method = "holm") < 0.05)
+which(p.adjust(p.vals_inter, method = "hochberg") < 0.05)
+
+# Holm and Hochberg says the following are stat sig : 
+# PrivateYes                 Enroll_log            P.Undergrad_log                  S.F.Ratio PrivateYes:P.Undergrad_log       Enroll_log:S.F.Ratio 
+
+```
+
+```{r}
+# Possible final model: Interaction model
+trimmed_inter_model = lm(F.Undergrad_log ~ Private+ Enroll_log+       P.Undergrad_log+  S.F.Ratio + Private:P.Undergrad_log     +  Enroll_log:S.F.Ratio ,data = College_transformed_1)
+summary(trimmed_inter_model)
+
+# I think that this will be my new model
+# all are stat sign
+
+
+final_model = trimmed_inter_model
+
+
+```
+```{r}
+# Our full model with all interactions between every single one of our paramters has Ajusted R^2 of 0.9627 
+# Where as our sparse model has an adjusted square of 0.9466 
+
+# Rather close, which is good.
+
+full_model <- lm(F.Undergrad_log ~ 
+                  (Private + Apps_log + Accept_log + Enroll_log + Top10perc_log + 
+                   Top25perc_sqrt + P.Undergrad_log + Outstate_sqrt + 
+                   Room.Board_sqrt + Books_log + Personal_log + PhD_sq + 
+                   Terminal_sq + S.F.Ratio + perc.alumni_sqrt + 
+                   Expend_inv + Grad.Rate)^2,
+                data = College_transformed_1)
+
+summary(full_model)
+```
+
+
