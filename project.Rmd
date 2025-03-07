@@ -1,0 +1,318 @@
+---
+title: "Final Project"
+author: "Elvin Liu"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r include = FALSE}
+library(ISLR)
+library(GGally)
+library(corrplot)
+library(tidyverse)
+```
+
+```{r}
+df <- College
+df_numeric <- df[, sapply(df, is.numeric)]
+
+df_priv <- filter(df, Private == "Yes")
+df_pub <- filter(df, Private == "No")
+```
+
+```{r}
+boxplot(df$F.Undergrad)
+boxplot(df$F.Undergrad ~ df$Private)
+
+hist(df$F.Undergrad)
+hist(df_priv$F.Undergrad)
+hist(df_pub$F.Undergrad)
+
+boxplot(log(df$F.Undergrad))
+boxplot(log(df$F.Undergrad) ~ df$Private)
+
+hist(log(df$F.Undergrad))
+hist(log(df_priv$F.Undergrad))
+hist(log(df_pub$F.Undergrad))
+```
+
+```{r}
+response <- "F.Undergrad"
+cor_mat <- cor(df_numeric)
+corrplot(cor_mat, method = "color")
+```
+
+```{r}
+# TRANSFORMATIONS AND BOXCOX
+library(MASS)
+num_vars <- ncol(df_numeric)
+
+ncols <- 3
+nrows <- ceiling(num_vars / ncols)
+
+for(col in names(df_numeric)) {
+  x <- df_numeric[[col]]
+  
+  if (min(x, na.rm = TRUE) <= 0) {
+    constant <- abs(min(x, na.rm = TRUE)) + 1
+    x <- x + constant
+  }
+  
+  boxcox(x ~ 1, lambda = seq(-2, 2, by = 0.1), plotit = TRUE)
+  title(main = col)
+}
+```
+
+```{r}
+# Summary from Box-Cox
+
+# Apps = 0 : [log]
+
+# Accept = 0 : [log]
+
+# Enroll = 0 : [log]
+
+# Top10perc = 0 : [log] OR 0.5 : [sqrt] -- (NO?) DIFFERENCE
+
+# Top25perc = 0.5 : [sqrt]
+
+# F.Undergrad = -0.5 : [inverse] OR 0 : [log] -- kept [log] for simplicity
+
+# P.Undergrad = 0 : [log]
+
+# Outstate = 0.5 : [sqrt]
+
+# Room.Board = 0 : [log] OR 0.5 : [sqrt] -- ? DIFFERENCE
+
+# Books = 0 : [log]
+
+# Personal = 0 : [log]
+
+# PhD = 2 : [sq]
+
+# Terminal = 2 : [sq]
+
+# S.F.Ratio = 0.5 : [sqrt]
+
+# perc.alumni = 0.5 : [sqrt]
+
+# Expend = -0.5 : [inverse]
+
+# Grad.Rate = 1 : [none]
+
+names(College)
+```
+
+```{r}
+plot(log(df$Top10perc), log(df$P.Undergrad)) # log Top10perc
+plot(sqrt(df$Top10perc), log(df$P.Undergrad)) # sqrt Top10perc
+
+plot(log(df$Room.Board), log(df$P.Undergrad)) # log Room.Board
+plot(sqrt(df$Room.Board), log(df$P.Undergrad)) # sqrt Room.Board
+```
+
+```{r}
+# Top10perc is log or sqrt
+# Room.Board is log or sqrt
+# Different combinations of transformations for Top10perc and Room.Board
+transform_combinations <- list(
+  list(Top10perc = log,  Room.Board = log),
+  list(Top10perc = log,  Room.Board = sqrt),
+  list(Top10perc = sqrt, Room.Board = log),
+  list(Top10perc = sqrt, Room.Board = sqrt)
+)
+
+apply_transformation <- function(transform) {
+  df %>%
+    transmute(
+      across(c(Apps, Accept, Enroll, F.Undergrad, P.Undergrad, Books, Personal), log, .names = "{.col}_log"),
+      across(c(Top25perc, Outstate, S.F.Ratio, perc.alumni), sqrt, .names = "{.col}_sqrt"),
+      across(c(PhD, Terminal), ~ .x^2, .names = "{.col}_sq"),
+      Private = Private,
+      Grad.Rate = Grad.Rate,
+      Top10perc_new = transform$Top10perc(Top10perc),
+      Room.Board_new = transform$Room.Board(Room.Board),
+      Expend_inv = (Expend^(-0.5) - 1) / (-0.5) # lambda = -0.5
+    )
+}
+
+# list of df's with transformed variables
+df_list <- map(transform_combinations, apply_transformation)
+
+df_transform_list <- lapply(df_list, identity)
+names(df_transform_list) <- paste0("df_transform_", seq_along(df_list))
+
+for (i in seq_along(df_list)) {
+  assign(paste0("df_transform_", i), df_list[[i]])
+}
+
+# Note: Top10perc_new and Room.Board_new in df_transform_i are both transformed
+# variables, I just couldn't figure out how to change the "new" in their names
+# to their respective transformations like "log" or "sqrt"
+```
+
+```{r}
+main_effects_models <- lapply(df_list, function(df) {
+  lm(F.Undergrad_log ~ Private + Apps_log + Accept_log + 
+       Enroll_log + Top10perc_new + Top25perc_sqrt + P.Undergrad_log + 
+       Outstate_sqrt + Room.Board_new + Books_log + Personal_log + 
+       PhD_sq + Terminal_sq + S.F.Ratio_sqrt + perc.alumni_sqrt + Expend_inv + 
+       Grad.Rate, data = df)
+})
+
+# main_effects_log_log is main effects but log(Top10perc) and log(Room.Board)
+# main_effects_log_sqrt is main effects but log(Top10perc) and sqrt(Room.Board)
+# main_effects_sqrt_log is main effects but sqrt(Top10perc) and log(Room.Board)
+# main_effects_sqrt_sqrt is main effects but sqrt(Top10perc) and sqrt(Room.Board)
+main_effects_log_log <- main_effects_models[[1]]
+main_effects_log_sqrt <- main_effects_models[[2]]
+main_effects_sqrt_log <- main_effects_models[[3]]
+main_effects_sqrt_sqrt <- main_effects_models[[4]]
+
+(main_sum_log_log <- summary(main_effects_log_log)) #     0.9488365
+(main_sum_log_sqrt <- summary(main_effects_log_sqrt)) #   0.9488282
+(main_sum_sqrt_log <- summary(main_effects_sqrt_log)) #   0.9488441
+(main_sum_sqrt_sqrt <- summary(main_effects_sqrt_sqrt)) # 0.9488363
+
+# Extremely marginal differences
+# sqrt(Top10perc) is marginally better than log(Top10perc)
+# log(Room.Board) is marginally better than log(Room.Board)
+# Doesn't really matter which one we choose but let's choose main_sum_sqrt_log
+```
+
+```{r}
+# EVALUATING MODEL WITH P VALUE CORRECTIONS
+# Alpha of 0.05
+# alpha = 0.05
+
+p.vals_1 <- main_sum_sqrt_log$coefficients[2:18, 4]
+
+# Bonferroni
+# Holm
+# Hockberg
+# Franklin Delano Roosevelt
+which(p.adjust(p.vals_1, method = "bonferroni") < 0.05)
+which(p.adjust(p.vals_1, method = "holm") < 0.05)
+which(p.adjust(p.vals_1, method = "hochberg") < 0.05)
+which(p.adjust(p.vals_1, method = "fdr") < 0.05)
+
+# bonferroni, holm, and hochberg give PrivateYes, Enroll_log, and P.Undergrad_log
+# fdr gives those and also Top25perc_sqrt, S.F.Ratio_sqrt, and perc.alumni_sqrt
+
+thin_model_1 <- lm(F.Undergrad_log ~ Private + Enroll_log + P.Undergrad_log,
+                   data = df_transform_3)
+
+fat_model_1 <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
+                    P.Undergrad_log + S.F.Ratio_sqrt + perc.alumni_sqrt,
+                  data = df_transform_3)
+
+anova(thin_model_1, fat_model_1)
+
+# statistically significant!
+# do it again!
+
+p.vals_2 <- summary(fat_model_1)$coefficients[2:7, 4]
+
+which(p.adjust(p.vals_2, method = "bonferroni") < 0.05)
+which(p.adjust(p.vals_2, method = "holm") < 0.05)
+which(p.adjust(p.vals_2, method = "hochberg") < 0.05)
+which(p.adjust(p.vals_2, method = "fdr") < 0.05)
+
+# bonferroni gives PrivateYes, Enroll_log, Top25perc_sqrt, and P.Undergrad_log
+# holm, hochberg, and fdr give those and also S.F.Ratio_sqrt and perc.alumni_sqrt
+
+thin_model_2 <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
+                     P.Undergrad_log,
+                   data = df_transform_3)
+
+fat_model_2 <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
+                    P.Undergrad_log + S.F.Ratio_sqrt + perc.alumni_sqrt,
+                  data = df_transform_3)
+
+anova(thin_model_2, fat_model_2)
+
+# statistically significant!
+# either S.F.Ratio_sqrt is important, perc.alumni_sqrt is important, or both
+# TODO
+
+x <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
+                    P.Undergrad_log + perc.alumni_sqrt,
+                  data = df_transform_3)
+
+anova(x, fat_model_2) # S.F.Ratio_sqrt is not sig
+
+y <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
+                    P.Undergrad_log + S.F.Ratio_sqrt,
+                  data = df_transform_3)
+
+anova(y, fat_model_2) # perc is sig
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+# NOT FINISHED
+# Making a model with trimmed_model_no_alum's main effects as well as its interactions
+
+trimmed_model_no_alum_inter = lm(F.Undergrad_log ~ (Private + Enroll_log + P.Undergrad_log + S.F.Ratio)^2 , data = College_transformed_1 )
+summary(trimmed_model_no_alum_inter)
+
+
+# Correcting the p values that we get from the summary
+p.vals_inter = summary(trimmed_model_no_alum_inter)$coefficients[2:10,4]
+
+which(p.adjust(p.vals_inter, method = "bonferroni") < 0.05)
+which(p.adjust(p.vals_inter, method = "holm") < 0.05)
+which(p.adjust(p.vals_inter, method = "hochberg") < 0.05)
+
+# Holm and Hochberg says the following are stat sig : 
+# PrivateYes                 Enroll_log            P.Undergrad_log                  S.F.Ratio PrivateYes:P.Undergrad_log       Enroll_log:S.F.Ratio 
+
+```
+
+```{r}
+# Possible final model: Interaction model
+trimmed_inter_model = lm(F.Undergrad_log ~ Private+ Enroll_log+       P.Undergrad_log+  S.F.Ratio + Private:P.Undergrad_log     +  Enroll_log:S.F.Ratio ,data = College_transformed_1)
+summary(trimmed_inter_model)
+
+# I think that this will be my new model
+# all are stat sign
+
+
+final_model = trimmed_inter_model
+
+
+```
+
+```{r}
+# Our full model with all interactions between every single one of our paramters has Ajusted R^2 of 0.9627 
+# Where as our sparse model has an adjusted square of 0.9466 
+
+# Rather close, which is good.
+
+full_model <- lm(F.Undergrad_log ~ 
+                  (Private + Apps_log + Accept_log + Enroll_log + Top10perc_log + 
+                   Top25perc_sqrt + P.Undergrad_log + Outstate_sqrt + 
+                   Room.Board_sqrt + Books_log + Personal_log + PhD_sq + 
+                   Terminal_sq + S.F.Ratio + perc.alumni_sqrt + 
+                   Expend_inv + Grad.Rate)^2,
+                data = College_transformed_1)
+
+summary(full_model)
+```
