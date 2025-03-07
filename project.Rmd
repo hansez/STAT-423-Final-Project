@@ -1,5 +1,5 @@
 ---
-title: "Final Project"
+title: "Final Project V2"
 author: "Elvin Liu"
 date: "`r Sys.Date()`"
 output: pdf_document
@@ -10,10 +10,15 @@ library(ISLR)
 library(GGally)
 library(corrplot)
 library(tidyverse)
+library(MASS)
 ```
 
 ```{r}
 df <- College
+
+x <- model.matrix(F.Undergrad ~ ., df)[, -1]
+y <- log(df$F.Undergrad)
+  
 df_numeric <- df[, sapply(df, is.numeric)]
 
 df_priv <- filter(df, Private == "Yes")
@@ -44,7 +49,6 @@ corrplot(cor_mat, method = "color")
 
 ```{r}
 # TRANSFORMATIONS AND BOXCOX
-library(MASS)
 num_vars <- ncol(df_numeric)
 
 ncols <- 3
@@ -169,101 +173,80 @@ main_effects_log_sqrt <- main_effects_models[[2]]
 main_effects_sqrt_log <- main_effects_models[[3]]
 main_effects_sqrt_sqrt <- main_effects_models[[4]]
 
-(main_sum_log_log <- summary(main_effects_log_log)) #     0.9488365
-(main_sum_log_sqrt <- summary(main_effects_log_sqrt)) #   0.9488282
-(main_sum_sqrt_log <- summary(main_effects_sqrt_log)) #   0.9488441
-(main_sum_sqrt_sqrt <- summary(main_effects_sqrt_sqrt)) # 0.9488363
+AIC(main_effects_log_log, main_effects_log_sqrt, main_effects_sqrt_log, main_effects_sqrt_sqrt)
 
-# Extremely marginal differences
-# sqrt(Top10perc) is marginally better than log(Top10perc)
-# log(Room.Board) is marginally better than log(Room.Board)
-# Doesn't really matter which one we choose but let's choose main_sum_sqrt_log
+#main_effects_sqrt_log has the smallest AIC, so we choose this as our main effects model
+
+fit_main <- main_effects_sqrt_log
 ```
 
 ```{r}
 # EVALUATING MODEL WITH P VALUE CORRECTIONS
-# Alpha of 0.05
 # alpha = 0.05
 
-p.vals_1 <- main_sum_sqrt_log$coefficients[2:18, 4]
+pvals <- sort(main_sum_sqrt_log$coefficients[2:18, 4])
 
-# Bonferroni
-# Holm
-# Hockberg
-# Franklin Delano Roosevelt
-which(p.adjust(p.vals_1, method = "bonferroni") < 0.05)
-which(p.adjust(p.vals_1, method = "holm") < 0.05)
-which(p.adjust(p.vals_1, method = "hochberg") < 0.05)
-which(p.adjust(p.vals_1, method = "fdr") < 0.05)
+which(p.adjust(pvals, method = "bonferroni") < 0.05)
+which(p.adjust(pvals, method = "holm") < 0.05)
+which(p.adjust(pvals, method = "BH") < 0.05)
 
-# bonferroni, holm, and hochberg give PrivateYes, Enroll_log, and P.Undergrad_log
-# fdr gives those and also Top25perc_sqrt, S.F.Ratio_sqrt, and perc.alumni_sqrt
+```
 
-thin_model_1 <- lm(F.Undergrad_log ~ Private + Enroll_log + P.Undergrad_log,
+```{r}
+thin.model <- lm(F.Undergrad_log ~ Private + Enroll_log + P.Undergrad_log,
                    data = df_transform_3)
 
-fat_model_1 <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
+fat.model <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
                     P.Undergrad_log + S.F.Ratio_sqrt + perc.alumni_sqrt,
                   data = df_transform_3)
 
-anova(thin_model_1, fat_model_1)
+anova(thin.model, fat.model)
+```
 
-# statistically significant!
-# do it again!
+```{r}
+#forward selection beginning from thin.model and ending at fat.model
+#iteratively adds each variable to identify which of the three variables
+#contribute to the outcome
+step(thin_model_1, scope = list(lower = thin_model_1, upper = fat_model_1), direction = "forward")
 
-p.vals_2 <- summary(fat_model_1)$coefficients[2:7, 4]
+parsimony <- lm(F.Undergrad_log ~ Private + Enroll_log + P.Undergrad_log + Top25perc_sqrt + perc.alumni_sqrt, data = df_transform_3)
+summary(parsimony)
 
-which(p.adjust(p.vals_2, method = "bonferroni") < 0.05)
-which(p.adjust(p.vals_2, method = "holm") < 0.05)
-which(p.adjust(p.vals_2, method = "hochberg") < 0.05)
-which(p.adjust(p.vals_2, method = "fdr") < 0.05)
-
-# bonferroni gives PrivateYes, Enroll_log, Top25perc_sqrt, and P.Undergrad_log
-# holm, hochberg, and fdr give those and also S.F.Ratio_sqrt and perc.alumni_sqrt
-
-thin_model_2 <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
-                     P.Undergrad_log,
-                   data = df_transform_3)
-
-fat_model_2 <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
-                    P.Undergrad_log + S.F.Ratio_sqrt + perc.alumni_sqrt,
-                  data = df_transform_3)
-
-anova(thin_model_2, fat_model_2)
-
-# statistically significant!
-# either S.F.Ratio_sqrt is important, perc.alumni_sqrt is important, or both
-# TODO
-
-x <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
-                    P.Undergrad_log + perc.alumni_sqrt,
-                  data = df_transform_3)
-
-anova(x, fat_model_2) # S.F.Ratio_sqrt is not sig
-
-y <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
-                    P.Undergrad_log + S.F.Ratio_sqrt,
-                  data = df_transform_3)
-
-anova(y, fat_model_2) # perc is sig
 ```
 
 
+```{r}
+pval_ordered <- sort(pvals)
+rank <- 1:length(pval_ordered)
+alpha <- 0.05
+m <- length(pval_ordered)
+
+bonferroni <- alpha / m
+holm <- alpha / (m - rank + 1)
+hochberg <- (rank / m) * alpha
 
 
+plot <- data.frame(
+Rank = rank,
+PValue = pval_ordered,
+Bonferroni = bonferroni,
+Holm = holm,
+Benjamini_Hochberg = hochberg
+)
+p <- ggplot(head(plot2, 8), aes(x = Rank, y = PValue)) +
+geom_point() +
+geom_line(aes(y = Bonferroni), color = "red", linetype = "dashed") +
+geom_line(aes(y = Holm), color = "blue", linetype = "dotted") +
+geom_line(aes(y = Benjamini_Hochberg), color = "green", linetype = "dotdash") +
+labs(
+x = "Rank",
+y = "P-value"
+) +
+theme_minimal()
 
+p
 
-
-
-
-
-
-
-
-
-
-
-
+```
 
 
 ```{r}
@@ -288,7 +271,11 @@ which(p.adjust(p.vals_inter, method = "hochberg") < 0.05)
 
 ```{r}
 # Possible final model: Interaction model
-trimmed_inter_model = lm(F.Undergrad_log ~ Private+ Enroll_log+       P.Undergrad_log+  S.F.Ratio + Private:P.Undergrad_log     +  Enroll_log:S.F.Ratio ,data = College_transformed_1)
+trimmed_inter_model = lm(F.Undergrad_log ~ Private+Enroll_log+P.Undergrad_log+
+                         S.F.Ratio+Private:P.Undergrad_log+
+                         Enroll_log:S.F.Ratio,
+                         data = College_transformed_1)
+
 summary(trimmed_inter_model)
 
 # I think that this will be my new model
