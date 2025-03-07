@@ -1,0 +1,222 @@
+---
+title: "Project EDA"
+output: html_document
+date: "2025-02-26"
+---
+
+```{r setup}
+library(ISLR2)
+library(dplyr)
+library(olsrr)
+library(glmnet)
+
+college <- College
+
+x <- model.matrix(F.Undergrad ~ ., college)[, -1]
+y <- log(college$F.Undergrad)
+
+#check normality assumption of our outcome variable
+hist(y)
+
+n <- nrow(college)
+eps <- 0.5
+var <- mean(lm(y ~ x)$residuals^2)
+
+# Simulate Y_tr conditional on the observed y
+y_train <- rnorm(n = n, mean = eps * y, sd = sqrt(eps * (1-eps) * var))
+y_test <- y - y_train
+```
+
+```{r}
+grid <- 10^seq(10, -2, length = 100)
+
+lasso.mod <- glmnet(x, y_train, alpha = 1, lambda = grid)
+
+cv.out <- cv.glmnet(x, y_train, alpha = 1, lambda = grid)
+
+bestlam <- cv.out$lambda.min
+
+out <- glmnet(x, y, alpha = 1)
+lasso.coef <- predict(out, type = "coefficients",
+                      s = bestlam)[1:18, ]
+lasso.coef
+
+selected_indices <- (lasso.coef != 0)[2:length(lasso.coef)]
+x_selected <- x[, selected_indices]
+colnames(x_selected)
+
+x_selected <- x_selected[, -c(2,7,8,9)]
+fit_lm <- lm(y ~ x_selected)
+summary(fit_lm)
+
+x_selected <- x_selected[, -c(5,6,7)]
+
+fit_lm <- lm(y ~ x_selected)
+summary(fit_lm)
+```
+
+
+
+
+
+
+
+```{r}
+# TRANSFORMATIONS AND BOX COX
+
+library(MASS) 
+
+
+numeric_cols <- College[, sapply(College, is.numeric)]
+
+num_vars <- ncol(numeric_cols)
+ncols <- 3
+nrows <- ceiling(num_vars / ncols)
+
+for(col in names(numeric_cols)) {
+
+    x <- numeric_cols[[col]]
+  if(min(x, na.rm = TRUE) <= 0) {
+    constant <- abs(min(x, na.rm = TRUE)) + 1
+    x <- x + constant
+  }
+  
+  boxcox(x ~ 1, lambda = seq(-2, 2, by = 0.1), plotit = TRUE)
+  title(main = col)
+}
+
+
+```
+
+```{r}
+# Read the paper to see how they did it
+# Box cox for all of them
+
+# Apps = 0 = Log
+
+# Accpt: 0 = Log
+
+# Enroll = 0 = Log
+
+# Top 10 Perc = 0 = log OR 0.5 which is square root -- NO DIFFERENCE
+
+# TOP 25 Perc = close to 1: square root or NO transformation -- Yes difference
+
+# F.undergrade = 0 -.25: LOG -- Keeping log since that makes things interpretable
+
+# P.Undergrad: 0 = LOG
+
+# Outstate: .5, square root.
+
+# Room Board: log or .5
+
+# Books: log
+
+#Personal: log
+
+# Ph.D Square since we have value of 2
+
+#Terminal: square since val of 2
+
+# S.F Ration: around one so keep
+
+# Perc.Alumn: Square root
+
+# Expend: -0.5: using inverse fucntion
+
+# grad.rate: 1 keep
+
+
+# Present the findings
+
+# Then a full model
+names(College)
+```
+
+```{r}
+library(dplyr)
+
+
+College_transformed_1 <- College %>%
+  mutate(
+    # Log transformations
+    Apps_log = log(Apps),
+    Accept_log = log(Accept),
+    Enroll_log = log(Enroll),
+    
+    # OR 0.5 which is square root
+    Top10perc_log = log(Top10perc),
+    
+    
+    P.Undergrad_log = log(P.Undergrad ),
+    Books_log = log(Books),
+    Personal_log = log(Personal),
+    
+    # Square root transformations
+    
+    # OR NO transformation
+    Top25perc_sqrt = sqrt(Top25perc),
+    
+    # .5 so square root. OR LOG
+    Outstate_sqrt = sqrt(Outstate),
+    Room.Board_sqrt = sqrt(Room.Board),
+    perc.alumni_sqrt = sqrt(perc.alumni),
+    
+    # Square transformations
+    PhD_sq = PhD^2,
+    Terminal_sq = Terminal^2,
+    
+    # Inverse transformations
+    F.Undergrad_log = log(F.Undergrad),
+    Expend_inv = (Expend^(-0.5) - 1) / (-0.5)             # Lambda = -0.5
+  )    
+
+```
+
+
+
+```{r}
+# Possible final model: Interaction model
+trimmed_inter_model = lm(F.Undergrad_log ~ Private+ Enroll_log+       P.Undergrad_log+  S.F.Ratio + Private:P.Undergrad_log     +  Enroll_log:S.F.Ratio ,data = College_transformed_1)
+summary(trimmed_inter_model)
+
+res <- trimmed_inter_model$residuals
+
+ordered_res <- as.matrix(sort(res))
+
+#diagnostics
+qqnorm(ordered_res)
+qqline(ordered_res)
+
+# I think that this will be my new model
+# all are stat sign
+
+
+final_model = trimmed_inter_model
+
+
+```
+```{r new model with more interaction effects}
+trimmed_inter_model2 = lm(F.Undergrad_log ~ Private+ Enroll_log+ Personal_log + Expend_inv + P.Undergrad_log+  S.F.Ratio + Private:P.Undergrad_log +  Enroll_log:S.F.Ratio + Personal_log:Expend_inv ,data = College_transformed_1)
+summary(trimmed_inter_model2)
+```
+
+```{r}
+# Our full model with all interactions between every single one of our paramters has Ajusted R^2 of 0.9627 
+# Where as our sparse model has an adjusted square of 0.9466 
+
+# Rather close, which is good.
+
+full_model <- lm(F.Undergrad_log ~ 
+                  (Private + Apps_log + Accept_log + Enroll_log + Top10perc_log + 
+                   Top25perc_sqrt + P.Undergrad_log + Outstate_sqrt + 
+                   Room.Board_sqrt + Books_log + Personal_log + PhD_sq + 
+                   Terminal_sq + S.F.Ratio + perc.alumni_sqrt + 
+                   Expend_inv + Grad.Rate),
+                data = College_transformed_1)
+
+summary(full_model)
+ols_step_forward_p(full_model)
+```
+
+
