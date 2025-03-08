@@ -1,28 +1,71 @@
 ---
-title: "Final Project V2"
-author: "Elvin Liu"
+title: "Final Project"
+author: "Alex Gonzalez, Hansen Zhang, Elvin Liu, Minh Tran"
 date: "`r Sys.Date()`"
 output: pdf_document
 ---
 
 ```{r include = FALSE}
-library(ISLR)
+library(MASS)
+library(ISLR2)
+library(olsrr)
+library(glmnet)
 library(GGally)
 library(corrplot)
 library(tidyverse)
-library(MASS)
 ```
 
 ```{r}
 df <- College
-
-x <- model.matrix(F.Undergrad ~ ., df)[, -1]
-y <- log(df$F.Undergrad)
-  
 df_numeric <- df[, sapply(df, is.numeric)]
 
-df_priv <- filter(df, Private == "Yes")
+df_priv <- filter(df, Private == "Yes") # split data into private / public
 df_pub <- filter(df, Private == "No")
+```
+
+```{r}
+x <- model.matrix(F.Undergrad ~ ., df)[, -1]
+y <- log(df$F.Undergrad)
+
+# Check normality assumption of our outcome variable
+hist(y)
+
+n <- nrow(df)
+eps <- 0.5
+var <- mean(lm(y ~ x)$residuals^2)
+
+# Simulate Y_tr conditional on the observed y
+y_train <- rnorm(n = n, mean = eps * y, sd = sqrt(eps * (1-eps) * var))
+y_test <- y - y_train
+```
+
+```{r}
+# Lasso Regression I think?
+grid <- 10^seq(10, -2, length = 100)
+
+lasso.mod <- glmnet(x, y_train, alpha = 1, lambda = grid)
+
+cv.out <- cv.glmnet(x, y_train, alpha = 1, lambda = grid)
+
+bestlam <- cv.out$lambda.min
+
+out <- glmnet(x, y, alpha = 1)
+lasso.coef <- predict(out, type = "coefficients",
+                      s = bestlam)[1:18, ]
+lasso.coef
+
+selected_indices <- (lasso.coef != 0)[2:length(lasso.coef)]
+x_selected <- x[, selected_indices]
+colnames(x_selected)
+
+x_selected <- x_selected[, -c(2,7,8,9)]
+fit_lm <- lm(y ~ x_selected)
+summary(fit_lm)
+
+x_selected <- x_selected[, -c(5,6,7)]
+
+fit_lm <- lm(y ~ x_selected)
+summary(fit_lm)
 ```
 
 ```{r}
@@ -157,11 +200,11 @@ for (i in seq_along(df_list)) {
 
 ```{r}
 main_effects_models <- lapply(df_list, function(df) {
-  lm(F.Undergrad_log ~ Private + Apps_log + Accept_log + 
-       Enroll_log + Top10perc_new + Top25perc_sqrt + P.Undergrad_log + 
-       Outstate_sqrt + Room.Board_new + Books_log + Personal_log + 
-       PhD_sq + Terminal_sq + S.F.Ratio_sqrt + perc.alumni_sqrt + Expend_inv + 
-       Grad.Rate, data = df)
+  lm(F.Undergrad_log ~ Private + Apps_log + Accept_log + Enroll_log + 
+       Top10perc_new + Top25perc_sqrt + P.Undergrad_log + Outstate_sqrt + 
+       Room.Board_new + Books_log + Personal_log + PhD_sq + Terminal_sq + 
+       S.F.Ratio_sqrt + perc.alumni_sqrt + Expend_inv + Grad.Rate, 
+     data = df)
 })
 
 # main_effects_log_log is main effects but log(Top10perc) and log(Room.Board)
@@ -173,9 +216,18 @@ main_effects_log_sqrt <- main_effects_models[[2]]
 main_effects_sqrt_log <- main_effects_models[[3]]
 main_effects_sqrt_sqrt <- main_effects_models[[4]]
 
+(main_sum_log_log <- summary(main_effects_log_log)) #     0.9488365
+(main_sum_log_sqrt <- summary(main_effects_log_sqrt)) #   0.9488282
+(main_sum_sqrt_log <- summary(main_effects_sqrt_log)) #   0.9488441
+(main_sum_sqrt_sqrt <- summary(main_effects_sqrt_sqrt)) # 0.9488363
+
+# Extremely marginal differences
+```
+
+```{r}
 AIC(main_effects_log_log, main_effects_log_sqrt, main_effects_sqrt_log, main_effects_sqrt_sqrt)
 
-#main_effects_sqrt_log has the smallest AIC, so we choose this as our main effects model
+# main_effects_sqrt_log has the smallest AIC, so we choose this as our main effects model
 
 fit_main <- main_effects_sqrt_log
 ```
@@ -186,36 +238,48 @@ fit_main <- main_effects_sqrt_log
 
 pvals <- sort(main_sum_sqrt_log$coefficients[2:18, 4])
 
+# Bonferroni
+# Holm
+# Hockberg
+# Franklin Delano Roosevelt
+# Benjamin
 which(p.adjust(pvals, method = "bonferroni") < 0.05)
 which(p.adjust(pvals, method = "holm") < 0.05)
+which(p.adjust(pvals, method = "hochberg") < 0.05)
+which(p.adjust(pvals, method = "fdr") < 0.05)
 which(p.adjust(pvals, method = "BH") < 0.05)
 
-```
+# bonferroni, holm, and hochberg give PrivateYes, Enroll_log, and P.Undergrad_log
+# fdr and BH give those and also Top25perc_sqrt, S.F.Ratio_sqrt, and perc.alumni_sqrt
 
-```{r}
-thin.model <- lm(F.Undergrad_log ~ Private + Enroll_log + P.Undergrad_log,
-                   data = df_transform_3)
+thin.model <- lm(F.Undergrad_log ~ Private + Enroll_log + P.Undergrad_log, 
+                 data = df_transform_3)
 
 fat.model <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
-                    P.Undergrad_log + S.F.Ratio_sqrt + perc.alumni_sqrt,
-                  data = df_transform_3)
+                  P.Undergrad_log + S.F.Ratio_sqrt + perc.alumni_sqrt, 
+                data = df_transform_3)
 
 anova(thin.model, fat.model)
-```
 
-```{r}
-#forward selection beginning from thin.model and ending at fat.model
-#iteratively adds each variable to identify which of the three variables
-#contribute to the outcome
-step(thin_model_1, scope = list(lower = thin_model_1, upper = fat_model_1), direction = "forward")
+# forward selection starting from thin.model and ending at fat.model
+# iteratively add each variable to identify which of the 3 variables contribute
+step(thin.model,
+     scope = list(lower = thin.model, upper = fat.model), 
+     direction = "forward")
 
-parsimony <- lm(F.Undergrad_log ~ Private + Enroll_log + P.Undergrad_log + Top25perc_sqrt + perc.alumni_sqrt, data = df_transform_3)
+# AIC = -2198.26
+# AIC = -2223.1 add Top25perc_sqrt
+# AIC = -2229.73 add perc.alumni_sqrt
+# AIC = -2231.76 add S.F.Ratio_sqrt
+# S.F.Ratio_sqrt barely contributes
+
+# best main effects are Private, Enroll_log, P.Undergrad_log, Top25perc_sqrt,
+# and perc.alumni_sqrt
+parsimony <- lm(F.Undergrad_log ~ Private + Enroll_log + P.Undergrad_log + 
+                  Top25perc_sqrt + perc.alumni_sqrt, 
+                data = df_transform_3)
 summary(parsimony)
 
-```
-
-
-```{r}
 pval_ordered <- sort(pvals)
 rank <- 1:length(pval_ordered)
 alpha <- 0.05
@@ -225,81 +289,124 @@ bonferroni <- alpha / m
 holm <- alpha / (m - rank + 1)
 hochberg <- (rank / m) * alpha
 
-
 plot <- data.frame(
-Rank = rank,
-PValue = pval_ordered,
-Bonferroni = bonferroni,
-Holm = holm,
-Benjamini_Hochberg = hochberg
+  Rank = rank, 
+  PValue = pval_ordered, 
+  Bonferroni = bonferroni, 
+  Holm = holm, 
+  Benjamini_Hochberg = hochberg
 )
-p <- ggplot(head(plot2, 8), aes(x = Rank, y = PValue)) +
-geom_point() +
-geom_line(aes(y = Bonferroni), color = "red", linetype = "dashed") +
-geom_line(aes(y = Holm), color = "blue", linetype = "dotted") +
-geom_line(aes(y = Benjamini_Hochberg), color = "green", linetype = "dotdash") +
-labs(
-x = "Rank",
-y = "P-value"
-) +
-theme_minimal()
+
+p <- ggplot(head(plot, 8), aes(x = Rank, y = PValue)) + 
+  geom_point() + 
+  geom_line(aes(y = Bonferroni), color = "red", linetype = "dashed") + 
+  geom_line(aes(y = Holm), color = "blue", linetype = "dotted") + 
+  geom_line(aes(y = Benjamini_Hochberg), color = "green", linetype = "dotdash") + 
+  labs(x = "Rank", y = "P-value") + 
+  theme_minimal()
 
 p
 
+# the code below just does the forward stepwise selection but manually
+# 
+# # statistically significant!
+# # do it again!
+# 
+# p.vals_2 <- summary(fat_model_1)$coefficients[2:7, 4]
+# 
+# which(p.adjust(p.vals_2, method = "bonferroni") < 0.05)
+# which(p.adjust(p.vals_2, method = "holm") < 0.05)
+# which(p.adjust(p.vals_2, method = "hochberg") < 0.05)
+# which(p.adjust(p.vals_2, method = "fdr") < 0.05)
+#
+# bonferroni gives PrivateYes, Enroll_log, Top25perc_sqrt, and P.Undergrad_log
+# holm, hochberg, and fdr give those and also S.F.Ratio_sqrt and perc.alumni_sqrt
+
+# thin_model_2 <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
+#                      P.Undergrad_log,
+#                    data = df_transform_3)
+# fat_model_2 <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
+#                     P.Undergrad_log + S.F.Ratio_sqrt + perc.alumni_sqrt,
+#                   data = df_transform_3)
+# anova(thin_model_2, fat_model_2)
+# 
+# # statistically significant!
+# # in addition to Private, Enroll_log, Top25perc_sqrt, and P-undergrad_log
+# # either S.F.Ratio_sqrt is important, perc.alumni_sqrt is important, or both
+# 
+# x <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
+#                     P.Undergrad_log + perc.alumni_sqrt,
+#                   data = df_transform_3)
+# 
+# anova(x, fat_model_2) # S.F.Ratio_sqrt is not sig
+# 
+# y <- lm(F.Undergrad_log ~ Private + Enroll_log + Top25perc_sqrt + 
+#                     P.Undergrad_log + S.F.Ratio_sqrt,
+#                   data = df_transform_3)
+# 
+# anova(y, fat_model_2) # perc is sig
 ```
 
-
 ```{r}
-# NOT FINISHED
-# Making a model with trimmed_model_no_alum's main effects as well as its interactions
+# main effects + interactions of our newly trimmed model with best main effects
+trimmed_full_model <- lm(F.Undergrad_log ~ (Private + Enroll_log + 
+                                           P.Undergrad_log + Top25perc_sqrt + 
+                                           perc.alumni_sqrt)^2, 
+                         data = df_transform_3)
+summary(trimmed_full_model)
 
-trimmed_model_no_alum_inter = lm(F.Undergrad_log ~ (Private + Enroll_log + P.Undergrad_log + S.F.Ratio)^2 , data = College_transformed_1 )
-summary(trimmed_model_no_alum_inter)
+# Correcting the p-values that we get from the summary
+p.vals_trim <- sort(summary(trimmed_full_model)$coefficients[2:11 ,4])
 
+which(p.adjust(p.vals_trim, method = "bonferroni") < 0.05)
+which(p.adjust(p.vals_trim, method = "holm") < 0.05)
+which(p.adjust(p.vals_trim, method = "hochberg") < 0.05)
+which(p.adjust(p.vals_trim, method = "fdr") < 0.05)
 
-# Correcting the p values that we get from the summary
-p.vals_inter = summary(trimmed_model_no_alum_inter)$coefficients[2:10,4]
-
-which(p.adjust(p.vals_inter, method = "bonferroni") < 0.05)
-which(p.adjust(p.vals_inter, method = "holm") < 0.05)
-which(p.adjust(p.vals_inter, method = "hochberg") < 0.05)
-
-# Holm and Hochberg says the following are stat sig : 
-# PrivateYes                 Enroll_log            P.Undergrad_log                  S.F.Ratio PrivateYes:P.Undergrad_log       Enroll_log:S.F.Ratio 
-
+# bonf, holm, hoch find Enroll_log, P.Undergrad_log, Private:P.Undergrad_log
+# by extension finds Private significant
+# fdr finds the addition of PrivateYes:Top25perc_sqrt and by extension 
+# Top25perc_sqrt
 ```
 
 ```{r}
-# Possible final model: Interaction model
-trimmed_inter_model = lm(F.Undergrad_log ~ Private+Enroll_log+P.Undergrad_log+
-                         S.F.Ratio+Private:P.Undergrad_log+
-                         Enroll_log:S.F.Ratio,
-                         data = College_transformed_1)
+# Interaction model
+thin_inter_model <- lm(F.Undergrad_log ~ Private + Enroll_log + 
+                         P.Undergrad_log + Private:P.Undergrad_log, 
+                       data = df_transform_3)
 
-summary(trimmed_inter_model)
+# add Top25perc_sqrt
+mid_int_model <- lm(F.Undergrad_log ~ Private + Enroll_log + 
+                           P.Undergrad_log + Top25perc_sqrt + 
+                           Private:P.Undergrad_log, 
+                         data = df_transform_3)
 
-# I think that this will be my new model
-# all are stat sign
+# add Top25perc_sqrt
+fat_inter_model <- lm(F.Undergrad_log ~ Private + Enroll_log + 
+                        P.Undergrad_log + Top25perc_sqrt + 
+                        Private:P.Undergrad_log + Private:Top25perc_sqrt, 
+                       data = df_transform_3)
 
+AIC(thin_inter_model, intermediate_model, fat_inter_model)
+# intermediate model is the best
 
-final_model = trimmed_inter_model
-
-
+final_model <- mid_inter_model
 ```
 
 ```{r}
-# Our full model with all interactions between every single one of our paramters has Ajusted R^2 of 0.9627 
-# Where as our sparse model has an adjusted square of 0.9466 
+# The full model with interactions between every single parameter has Adjusted
+# R-squared of 0.9628 and R-squared of 0.9701
 
-# Rather close, which is good.
-
-full_model <- lm(F.Undergrad_log ~ 
-                  (Private + Apps_log + Accept_log + Enroll_log + Top10perc_log + 
-                   Top25perc_sqrt + P.Undergrad_log + Outstate_sqrt + 
-                   Room.Board_sqrt + Books_log + Personal_log + PhD_sq + 
-                   Terminal_sq + S.F.Ratio + perc.alumni_sqrt + 
-                   Expend_inv + Grad.Rate)^2,
-                data = College_transformed_1)
+# The sparse model on the other hand has... Adjusted R-squared (0.9466)
+full_model <- lm(F.Undergrad_log ~ (Private + Apps_log + Accept_log + 
+                                    Enroll_log + Top10perc_new + 
+                                    Top25perc_sqrt + P.Undergrad_log + 
+                                    Outstate_sqrt + Room.Board_new + Books_log + 
+                                    Personal_log + PhD_sq + Terminal_sq + 
+                                    S.F.Ratio_sqrt + perc.alumni_sqrt + 
+                                    Expend_inv + Grad.Rate)^2,
+                 data = df_transform_3)
 
 summary(full_model)
+summary(final_model)
 ```
