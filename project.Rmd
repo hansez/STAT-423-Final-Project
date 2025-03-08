@@ -10,7 +10,7 @@ library(MASS)
 library(ISLR2)
 library(olsrr)
 library(glmnet)
-library(GGally)
+library(lmtest)
 library(corrplot)
 library(tidyverse)
 ```
@@ -409,4 +409,71 @@ full_model <- lm(F.Undergrad_log ~ (Private + Apps_log + Accept_log +
 
 summary(full_model)
 summary(final_model)
+
+residuals <- residuals(final_model)
+# Private + Enroll_log + P.Undergrad_log + Top25perc_sqrt + Private:P.Undergrad_log
+```
+
+```{r}
+# Check assumptions:
+# expected value of epsilon_i = 0
+# variance of epsilon_i = sigma^2
+# covariance of epsilon_i and epsilon_j = 0
+# epsilon_i ~ N(0, sigma^2)
+
+# STANDARDIZED RESIDUALS
+# why standardized and when?
+plot(final_model, which = 2) # standardized qqplot
+plot(final_model, which = 3) # standardized residuals vs fitted
+plot(final_model, which = 4) # cook's distance
+plot(final_model, which = 5) # residuals vs leverage
+
+# MEAN 0 AND CONSTANT VARIANCE
+selected_cols <- c(3, 5, 8, 14) # residuals vs predictor
+par(mfrow = c(2, 2))
+for (i in selected_cols) {
+  plot(df_transform_3[[i]], residuals,
+       xlab = colnames(df_transform_3)[i], ylab = "Residuals",
+       main = paste("Residuals vs", colnames(df_transform_3)[i]))
+  abline(h = 0, col = "red", lty = 2)
+}
+
+par(mfrow = c(1, 1))
+plot(final_model, which = 1) # Turkey-Anscombe (residuals vs fitted)
+
+# fit a linear model with squared residuals as
+# the response and as the independent variable
+lm_sq_resid <- lm(formula = resid(final_model)^2 ~ fitted(final_model))
+summary(lm_sq_resid)
+
+lmtest::bptest(final_model) # Breusch-Pagan Test for constancy of error variable
+
+# 0 CORRELATION
+index <- 1:length(residuals)
+ggplot(data.frame(index, residuals), aes(x = index, y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Residuals vs Index",
+       x = "Index (Observation Number)",
+       y = "Residuals") +
+  theme_minimal() # Plot residuals against index, although we don't really have an index so doesn't make sense
+# Don't know of any others...
+
+# NORMALITY
+hist(final_model$residuals, 
+     breaks = 50,
+     probability = TRUE,
+     main = "Histogram of Residuals with Normal Distribution Overlay",
+     xlab = "Residuals",
+     ylab = "Density",
+     ylim = c(0, 2.5))
+curve(dnorm(x, mean = mean(final_model$residuals), 
+            sd = sd(final_model$residuals)), 
+      add = TRUE,
+      col = "red",
+      lwd = 2) # histogram of residuals
+
+qqnorm(final_model$residuals, pch = 20, col = "black") # qqplot
+qqline(final_model$residuals, col = "red", lwd = 2)
+# Could try Kolmogorov–Smirnov test and the Shapiro–Wilk test
 ```
