@@ -376,7 +376,7 @@ thin_inter_model <- lm(F.Undergrad_log ~ Private + Enroll_log +
                        data = df_transform_3)
 
 # add Top25perc_sqrt
-mid_int_model <- lm(F.Undergrad_log ~ Private + Enroll_log + 
+mid_inter_model <- lm(F.Undergrad_log ~ Private + Enroll_log + 
                            P.Undergrad_log + Top25perc_sqrt + 
                            Private:P.Undergrad_log, 
                          data = df_transform_3)
