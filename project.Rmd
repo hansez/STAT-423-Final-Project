@@ -387,7 +387,7 @@ fat_inter_model <- lm(F.Undergrad_log ~ Private + Enroll_log +
                         Private:P.Undergrad_log + Private:Top25perc_sqrt, 
                        data = df_transform_3)
 
-AIC(thin_inter_model, intermediate_model, fat_inter_model)
+AIC(thin_inter_model, mid_inter_model, fat_inter_model)
 # intermediate model is the best
 
 final_model <- mid_inter_model
