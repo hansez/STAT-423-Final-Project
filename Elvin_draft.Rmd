@@ -1,0 +1,442 @@
+---
+title: "Hansen_draft"
+author: "Hansen Zhang"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    keep_tex: true
+    
+---
+
+```{r setup, include=F}
+rm(list = ls())
+library(ISLR2)
+library(tidyverse)
+library(olsrr)
+library(glmnet)
+library(dplyr)
+require(leaps)
+require(faraway)
+require(car)
+library(corrplot)
+library(ggplot2)
+library(gridExtra)
+library(knitr)
+library(broom)
+```
+
+# Checking for Outliers/Leverage Points
+
+```{r}
+full <- lm(log(F.Undergrad) ~., data = College)
+
+p <- length(coef(full)) - 1
+n <- nrow(College)
+
+leverage_threshold <- 2*(p+1)/n
+rstudentized <- rstudent(full)
+
+leverage_points <- which(hatvalues(full) > leverage_threshold)
+outliers <- which(abs(rstudentized) > 3)
+both <- intersect(outliers, leverage_points)
+
+cat("Leverage Points:", leverage_points, "\n")
+cat("Outliers:", outliers, "\n")
+cat("Both:", both, "\n")
+```
+
+```{r leverage vs residuals plot}
+plot(hatvalues(full), rstudentized, 
+     main = "Leverage vs Residuals", 
+     ylab = "Studentized Residuals", 
+     xlab = "Leverage")
+
+abline(v = leverage_threshold, col = "blue", lwd = 2, lty = 2)
+abline(h = 3, col = "red", lwd = 2, lty = 2)
+abline(h = -3, col = "red", lwd = 2, lty = 2)
+```
+
+```{r cooks distance}
+cooks_dist <- cooks.distance(full)
+
+f_crit <- qf(0.45, df1 = p + 1, df2 = n - p - 1)
+which(cooks_dist>f_crit)
+
+leverage_points.both <- hatvalues(full)[both]
+residuals.both <- rstudentized[both]
+cooks_dist.both <- cooks_dist[both]
+
+result_table <- data.frame(
+  Leverage = leverage_points.both,
+  Residual = residuals.both,
+  Cooks_Distance = cooks_dist.both
+)
+
+result_table <- result_table[order(-result_table$Cooks_Distance),]
+print(result_table)
+```
+
+----
+
+# Multicollinearity of predictors 
+
+```{r correlation}
+numeric_cols <- sapply(College, is.numeric)
+college_numeric <- College[, numeric_cols] %>% 
+  dplyr::select(-F.Undergrad)
+
+cor_mat <- cor(college_numeric)
+corrplot(cor_mat, method = "color")
+```
+
+```{r}
+high_cor_indices <- which(cor_mat > 0.6 & cor_mat < 1, arr.ind = TRUE) %>%
+  .[.[, 1] < .[, 2], ]
+
+high_cor_names <- data.frame(
+  Row = rownames(cor_mat)[high_cor_indices[, 1]],
+  Column = colnames(cor_mat)[high_cor_indices[, 2]],
+  Correlation = cor_mat[high_cor_indices]
+)
+
+high_cor_names <- high_cor_names[order(-high_cor_names$Correlation), ]
+
+print(high_cor_names)
+
+plot(log(College$Enroll), log(College$Apps))
+```
+
+```{r VIF & multicollinearity}
+model <- lm(log(F.Undergrad) ~ ., data = College)
+
+vif_values <- vif(model)
+
+vif_table <- data.frame(
+  Variable = names(vif_values),
+  VIF = vif_values
+)
+
+high_vif_table <- vif_table[vif_table$VIF > 3, ]
+
+high_vif_table <- high_vif_table[order(-high_vif_table$VIF), ]
+
+print(high_vif_table)
+```
+
+----
+
+# Exploratory Visualizations
+
+```{r outcome variable}
+
+plot1 <- ggplot(College, aes(x = F.Undergrad)) +
+  geom_histogram(bins = 30, fill = "lightblue", color = "black") +
+  labs(title = "Histogram of F.Undergrad") +
+  theme_minimal()
+
+plot2 <- ggplot(College, aes(x = log(F.Undergrad))) +
+  geom_histogram(bins = 30, fill = "lightgreen", color = "black", aes(y = after_stat(density))) +  # Use density instead of count
+  stat_function(fun = dnorm, args = list(mean = mean(log(College$F.Undergrad), na.rm = TRUE),
+                                        sd = sd(log(College$F.Undergrad), na.rm = TRUE)),
+                color = "red", size = 1) +  # Add normal curve
+  labs(title = "Histogram of log(F.Undergrad)") +
+  theme_minimal()
+
+grid.arrange(plot1, plot2, ncol = 2)
+```
+
+```{r outcome variable by private vs public}
+ggplot(College, aes(x = Private, y = log(F.Undergrad), fill = Private)) +
+  geom_boxplot(width = 0.3, outlier.color = "red", outlier.shape = 16, outlier.size = 2) +
+  scale_fill_manual(values = c("#00BFC4", "#F8766D")) + # custom colors for categories
+  labs(
+    title = "Log of Full-time Undergraduates by Private/Public Colleges",
+    x = "Private College",
+    y = "Log(Number of Full-time Undergraduates)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.title.x = element_text(margin = margin(t = 10)),
+    axis.title.y = element_text(margin = margin(r = 10))
+  )
+```
+
+# Dataset Transformation
+
+```{r}
+college <- College %>% 
+  mutate(F.Undergrad.log = log(F.Undergrad), 
+         Private = as.factor(Private)) %>% #transform response and factor variable
+  dplyr::select(-F.Undergrad) %>% #remove old response variable
+  dplyr::select(-c(Apps,Accept,Top10perc,PhD,Room.Board)) %>% 
+  filter(rownames(College) != "Rutgers at New Brunswick")#remove collinear variables
+```
+----
+
+# Model Selection 
+
+## Initial Model
+
+```{r full main effects model}
+fit.1 <- lm(F.Undergrad.log ~., data = college)
+summary(fit.1)
+```
+
+----
+
+## Final Main Effects Model
+```{r}
+pvals <- sort(summary(fit.1)$coefficients[2:length(coef(fit.1)), 4])
+alpha <- 0.05
+rank <- 1:length(pvals)
+m <- length(pvals)
+
+FWER <- 1 - (1-alpha)^m
+
+methods <- c("bonferroni", "holm", "hochberg", "BH")
+results <- sapply(methods, function(m) p.adjust(pvals, method = m) < alpha)
+
+signif_table <- data.frame(
+  Index = seq_along(pvals), 
+  PValue = pvals,       
+  Bonferroni = results[, "bonferroni"],
+  Holm = results[, "holm"],
+  Hochberg = results[, "hochberg"],
+  BH = results[, "BH"]
+)
+
+print(signif_table)
+```
+
+```{r visualization}
+bonferroni <- alpha / m
+holm <- alpha / (m - rank + 1)
+BH <- (rank / m) * alpha
+
+data <- data.frame(
+  Rank = rank, 
+  PValue = pvals, 
+  Bonferroni = bonferroni, 
+  Holm = holm, 
+  Benjamini_Hochberg = BH
+)
+
+plot <- ggplot(head(data, 15), aes(x = Rank, y = PValue)) + 
+  geom_point() + 
+  geom_line(aes(y = Bonferroni, color = "Bonferroni"), linetype = "dashed", size = 0.75) + 
+  geom_line(aes(y = Holm, color = "Holm"), linetype = "dotted", size = 0.75) + 
+  geom_line(aes(y = Benjamini_Hochberg, color = "Benjamini-Hochberg"), linetype = "dotdash", size = 0.75) + 
+  scale_color_manual(values = c("Bonferroni" = "red", "Holm" = "blue", "Benjamini-Hochberg" = "green")) +
+  labs(x = "Rank", y = "P-value", color = "Adjustment Method") + 
+  theme_minimal() +
+  theme(legend.position = c(0.16, .8))
+
+print(plot)
+```
+
+```{r}
+bonferroni_names <- as.vector(rownames(signif_table)[which(signif_table$Bonferroni)])
+bonferroni_names[which(bonferroni_names == "PrivateYes")] <- "Private"
+  
+bh_names <-  rownames(signif_table)[which(signif_table$BH)]
+bh_names[which(bh_names == "PrivateYes")] <- "Private"
+
+y <- college$F.Undergrad.log
+
+x.thin <- college %>% 
+  dplyr::select(all_of(bonferroni_names))
+
+x.fat <- college %>% 
+  dplyr::select(all_of(bh_names))
+
+fit.thin <- lm(y~., data = x.thin)
+fit.fat <- lm(y~., data = x.fat)
+fit.pars <- fit.thin
+
+BIC(fit.thin, fit.fat)
+summary(fit.pars)
+```
+
+```{r}
+regsubsets.out <- regsubsets(formula(fit.pars), data = x.fat, nbest = 1, nvmax = 12)
+
+reg.sum <- summary(regsubsets.out)
+
+bic <- reg.sum$bic
+cp <- reg.sum$cp
+
+#manual aic calculation
+n = nrow(college); p = length(coef(fit.pars)) - 1; rss = reg.sum$rss
+aic <- 2*(p+1) + n*(1+log(2*pi)) + n*log(rss/n)
+
+table <- as_tibble(rbind(aic,bic,cp)) %>%
+   cbind(criterion = c("AIC", "BIC", "Mallow's Cp"), .)
+
+colnames(table)[-1] <- paste("p", rep(1:p), sep= "=")
+
+print(table)
+
+#since we all choose the criterion which minimizes for all three
+apply(table[-1], 1, function(x) colnames(table[-1])[which.min(x)])
+
+coefs <- reg.sum$which[,-1]
+```
+----
+
+# Final Interaction Model
+
+```{r}
+fit.inter <- lm(y~.^2, data = x.thin)
+summary(fit.inter)
+```
+
+```{r}
+pvals <- sort(summary(fit.inter)$coefficients[2:length(coef(fit.inter)), 4])
+alpha <- 0.05
+rank <- 1:length(pvals)
+m <- length(pvals)
+
+FWER <- 1 - (1-alpha)^m
+
+methods <- c("bonferroni", "holm", "hochberg", "BH")
+results <- sapply(methods, function(m) p.adjust(pvals, method = m) < alpha)
+
+signif_table <- data.frame(
+  Index = seq_along(pvals), 
+  PValue = pvals,       
+  Bonferroni = results[, "bonferroni"],
+  Holm = results[, "holm"],
+  Hochberg = results[, "hochberg"],
+  BH = results[, "BH"]
+)
+
+head(signif_table, 16)
+```
+
+```{r final model}
+model.thin <- lm(F.Undergrad.log~Enroll + S.F.Ratio + Private + Top25perc + P.Undergrad +
+                                 Grad.Rate + Outstate +
+                                 Enroll:Private + Enroll:P.Undergrad + Enroll:S.F.Ratio +
+                                 Enroll:Top25perc + Private:P.Undergrad,
+                 data = college)
+
+
+
+model.fat <- lm(F.Undergrad.log~Enroll + S.F.Ratio + Private + Top25perc + 
+                                P.Undergrad + Grad.Rate + Outstate + Expend + perc.alumni +
+                                Enroll:Private + Enroll:P.Undergrad + Enroll:S.F.Ratio +
+                                Enroll:Top25perc + Private:P.Undergrad +
+                                Grad.Rate:Top25perc + Private:S.F.Ratio +
+                                Grad.Rate:Outstate + Enroll:Expend + 
+                                perc.alumni:Top25perc + Private:S.F.Ratio +
+                                Grad.Rate:Expend + S.F.Ratio:P.Undergrad, 
+               data = college)
+
+model <-  step(model.thin,
+               scope = list(lower = model.thin, upper = model.fat),
+               dir = "forward",
+               k = log(n),
+               trace = 0)
+
+summary(model.thin)
+summary(model.fat)
+model_summary <- summary(model)
+```
+
+----
+
+# Train/Test Set using Data Splitting
+
+```{r}
+n <- nrow(college)
+x <- model.matrix(F.Undergrad.log ~ ., college)[, -ncol(college)]
+y <- college$F.Undergrad.log
+
+eps <- 0.5
+var <- mean(lm(y ~ x)$residuals^2)
+
+# Simulate Y_tr conditional on the observed y
+y_train <- rnorm(n = n, mean = eps * y, sd = sqrt(eps * (1-eps) * var))
+y_test <- y - y_train
+```
+
+*NOTE:*
+y_train + all of x is your training set. y_test + all of x is your testing set!
+
+----
+
+# Checking Model Assumptions
+
+```{r}
+# Check assumptions:
+# expected value of epsilon_i = 0
+# variance of epsilon_i = sigma^2
+# covariance of epsilon_i and epsilon_j = 0
+# epsilon_i ~ N(0, sigma^2)
+
+# STANDARDIZED RESIDUALS
+# why standardized and when?
+plot(model, which = 2) # standardized qqplot
+plot(model, which = 3) # standardized residuals vs fitted
+plot(model, which = 4) # cook's distance
+plot(model, which = 5) # residuals vs leverage
+
+# MEAN 0 AND CONSTANT VARIANCE
+# Enroll (2) + S.F.Ratio (9) + Private (1) + Top25perc (3) + P.Undergrad (4) + Grad.Rate (12) + Outstate (5) + perc.alumni (10)
+selected_cols <- c(1, 2, 3, 4, 5, 9, 10, 12) # residuals vs predictor
+par(mfrow = c(2, 2))
+for (i in selected_cols) {
+  plot(college[[i]], rstudent(model),
+       xlab = colnames(college)[i], ylab = "Residuals",
+       main = paste("Residuals vs", colnames(college)[i]))
+  abline(h = 0, col = "red", lty = 2)
+}
+
+par(mfrow = c(1, 1))
+plot(model, which = 1) # Turkey-Anscombe (residuals vs fitted)
+
+# fit a linear model with squared residuals as
+# the response and as the independent variable
+lm_sq_resid <- lm(formula = resid(model)^2 ~ fitted(model))
+summary(lm_sq_resid)
+
+lmtest::bptest(model) # Breusch-Pagan Test for constancy of error variable
+
+# NORMALITY
+hist(model$residuals, 
+     breaks = 50,
+     probability = TRUE,
+     main = "Histogram of Residuals with Normal Distribution Overlay",
+     xlab = "Residuals",
+     ylab = "Density",
+     ylim = c(0, 2.5))
+curve(dnorm(x, mean = mean(model$residuals), 
+            sd = sd(model$residuals)), 
+      add = TRUE,
+      col = "red",
+      lwd = 2) # histogram of residuals
+
+qqnorm(model$residuals, pch = 20, col = "black") # qqplot
+qqline(model$residuals, col = "red", lwd = 2)
+# Could try Kolmogorov–Smirnov test and the Shapiro–Wilk test
+```
+
+
+# Code to Generate Figures for Overleaf
+
+```{r Example}
+#using knitr
+# kable(df,format = "latex", booktabs = TRUE, longtable = TRUE)
+
+#using broom
+# model_summary <- tidy(model)
+# kable(model_summary, format = "latex", booktabs = TRUE, longtable = TRUE)
+```
+
+```{r}
+# kable(BIC(model.thin, model, model.fat), format = "latex", booktabs = TRUE, longtable = TRUE)
+```
+
+
